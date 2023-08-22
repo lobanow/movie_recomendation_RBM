@@ -1,0 +1,136 @@
+import torch
+import torch.nn.parallel
+import torch.utils.data
+import matplotlib.pyplot as plt
+from timeit import default_timer as timer
+
+plt.style.use('ggplot')
+device = torch.device('cpu')
+torch.set_num_threads(8)
+
+# Drama | Comedy | Adventure | Horror | Documentary | Action | Sci-Fi | Animation
+train_data = torch.tensor([
+    [0, 0, 0, 0, 0, 1, 1, 0], # Robocop (1987)::Action|Crime|Sci-Fi
+    [0, 0, 1, 0, 0, 0, 0, 1], # Who Framed Roger Rabbit? (1988)::Adventure|Animation|Film-Noir
+    [1, 0, 0, 0, 0, 0, 0, 0], # Melvin and Howard (1980)::Drama
+    [0, 0, 0, 0, 0, 1, 0, 0], # For Your Eyes Only (1981)::Action
+    [0, 0, 0, 1, 0, 0, 0, 0], # Rawhead Rex (1986)::Horror|Thriller
+    [0, 0, 1, 0, 0, 1, 0, 1], # Princess Mononoke, The (Mononoke Hime) (1997)::Action|Adventure|Animation
+    [0, 1, 0, 0, 0, 0, 0, 0], # Man of the Century (1999)::Comedy
+    [1, 1, 0, 0, 0, 0, 0, 0], # Train of Life (Train De Vie) (1998)::Comedy|Drama
+    [0, 1, 0, 1, 0, 0, 0, 0], # Bride of Re-Animator (1990)::Comedy|Horror
+    [1, 0, 0, 0, 0, 0, 1, 0], # Goodbye, 20th Century (Zbogum na dvadesetiot vek) (1998)::Drama|Sci-Fi
+    [0, 1, 1, 0, 0, 0, 1, 0], # Crimson Pirate, The (1952)::Adventure|Comedy|Sci-Fi
+    [1, 1, 0, 0, 0, 0, 0, 0], # Mystery Train (1989)::Comedy|Crime|Drama
+    [1, 0, 0, 0, 0, 1, 0, 0], # Fighting Seabees, The (1944)::Action|Drama|War
+    [0, 1, 0, 0, 0, 1, 0, 0], # Action Jackson (1988)::Action|Comedy
+    [0, 0, 0, 0, 1, 0, 0, 0], # Catwalk (1995)::Documentary
+    [1, 0, 0, 0, 1, 0, 0, 0], # Looking for Richard (1996)::Documentary|Drama
+], dtype=float)
+
+
+test_data = torch.tensor([
+    [1, 0, 1, 0, 0, 0, 0, 0], # Bronco Billy (1980)::Adventure|Drama|Romance
+    [0, 0, 1, 0, 0, 1, 0, 0], # Highlander: Endgame (2000)::Action|Adventure|Fantasy
+    [0, 0, 0, 1, 0, 0, 1, 0], # Return of the Fly (1959)::Horror|Sci-Fi
+    [0, 1, 0, 0, 0, 0, 0, 1], # Creature Comforts (1990)::Animation|Comedy
+    [1, 1, 0, 0, 0, 0, 1, 0], # Close Encounters of the Third Kind (1977)::Drama|Sci-Fi
+    [0, 0, 1, 0, 0, 1, 1, 0], # Godzilla 2000 (Gojira ni-sen mireniamu) (1999)::Action|Adventure|Sci-Fi
+], dtype=float)
+
+test_data_index_to_name = {
+    0: 'Bronco Billy (1980)::Adventure|Drama|Romance',
+    1: 'Highlander: Endgame (2000)::Action|Adventure|Fantasy',
+    2: 'Return of the Fly (1959)::Horror|Sci-Fi',
+    3: 'Creature Comforts (1990)::Animation|Comedy',
+    4: 'Close Encounters of the Third Kind (1977)::Drama|Sci-Fi',
+    5: 'Godzilla 2000 (Gojira ni-sen mireniamu) (1999)::Action|Adventure|Sci-Fi',
+}
+
+acc = []
+
+class RBM():
+    def __init__(self, nv, nh):
+        self.W = torch.randn(nh, nv, dtype=float)
+        self.a = torch.randn(1, nv, dtype=float)
+        self.b = torch.randn(1, nh, dtype=float)
+        
+    def sample_h(self, x):
+        wx = torch.mm(x, self.W.t())
+        activation = wx + self.b.expand_as(wx)
+        p_h_given_v = torch.sigmoid(activation)
+        return p_h_given_v, torch.bernoulli(p_h_given_v)
+    
+    def sample_v(self, y):
+        wy = torch.mm(y, self.W)
+        activation = wy + self.a.expand_as(wy)
+        p_v_given_h = torch.sigmoid(activation)
+        return p_v_given_h, torch.bernoulli(p_v_given_h)
+    
+    def correct_weights(self, v0, vk, ph0, phk, lr):
+        self.W += lr * (v0.t() @ ph0 - vk.t() @ phk).t() / v0.shape[1]
+        self.a += lr * torch.mean((v0 - vk))
+        self.b += lr * torch.mean((ph0 - phk))
+
+    def train(self, epoch_count, train_data, eps):
+        for epoch in range(1, epoch_count + 1):
+            vk = train_data
+            v0 = train_data
+            
+            ph0,_ = self.sample_h(v0)
+            for _ in range(eps):
+                _,hk = self.sample_h(vk)
+                _,vk = self.sample_v(hk)
+                
+            phk,_ = rbm.sample_h(vk)
+            self.correct_weights(v0, vk, ph0, phk, lr)
+            
+            epoch_accuracy = torch.mean((v0 == vk).to(float)).item()
+
+            global acc
+            acc.append(epoch_accuracy)
+                
+            print('Epoch:{0:4d} Restore accuracy:{1:1.4f}'.format(epoch, epoch_accuracy))
+    
+    def restore(self, x):
+        _,h = rbm.sample_h(x)
+        _,v = rbm.sample_v(h)
+
+        return v
+
+nv = train_data.shape[1]
+nh = 4
+
+rbm = RBM(nv, nh)
+eps = 1
+
+nb_epoch = 15000
+lr = 0.1
+acc = []
+start = timer()
+rbm.train(nb_epoch, train_data, eps)
+plt.plot(acc)
+# plt.show()
+
+test_list = [0, 0, 1, 0, 0, 0, 0, 0]
+test = torch.tensor([test_list], dtype=float)
+
+reccomendation_pool = []
+for _ in range(10):
+    v = rbm.restore(test)
+    reccomendation_pool.append(v)
+
+reccomendation_pool = torch.cat(reccomendation_pool)
+
+count = dict()
+for i in range(reccomendation_pool.shape[0]):
+    count[i] = 0
+    for j in range(reccomendation_pool.shape[0]):
+        if torch.eq(reccomendation_pool[i], reccomendation_pool[j]).all():
+            count[i] += 1
+
+reccomendation_index = max(count, key=count.get)
+reccomendation = torch.norm(test_data - reccomendation_pool[reccomendation_index], dim=1).argmin().item()
+
+print('Input: ',  test_list)
+print('Reccomendation: ', test_data_index_to_name[reccomendation])
